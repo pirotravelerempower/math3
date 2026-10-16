@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>振り子シミュレーター</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+            color: #1e293b;
+            margin: 0;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        .stopwatch-font {
+            font-family: 'JetBrains Mono', monospace;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* カスタムレンジスライダー */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+            margin: 10px 0;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 24px;
+            width: 24px;
+            border-radius: 50%;
+            background: linear-gradient(145deg, #ffffff, #e2e8f0);
+            border: 1px solid #94a3b8;
+            cursor: pointer;
+            margin-top: -9px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 6px;
+            cursor: pointer;
+            background-color: #cbd5e1;
+            border-radius: 3px;
+        }
+        input[type=range]:focus {
+            outline: none;
+        }
+        input[type=range]:focus::-webkit-slider-runnable-track {
+            background-color: #94a3b8;
+        }
+
+        /* キャンバス領域 */
+        #simCanvas {
+            background-color: #ffffff;
+            background-image: 
+                linear-gradient(90deg, rgba(0, 0, 0, 0.03) 1px, transparent 1px),
+                linear-gradient(rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+            background-size: 20px 20px;
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* ボタンスタイル */
+        .btn-base {
+            transition: all 0.1s ease;
+        }
+        .btn-base:active {
+            transform: translateY(2px);
+        }
+
+        /* リサイザー */
+        #resizer {
+            width: 8px;
+            background-color: #e2e8f0;
+            cursor: col-resize;
+            transition: background-color 0.2s;
+            z-index: 10;
+        }
+        #resizer:hover, #resizer.active {
+            background-color: #94a3b8;
+        }
+
+        /* パネルのスクロールバーを隠す（Webkit） */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
+        }
+    </style>
+</head>
+<body class="flex flex-row h-screen w-full box-border">
+
+    <!-- 左側：設定パネル -->
+    <aside id="left-panel" class="flex flex-col gap-6 p-6 overflow-y-auto no-scrollbar shrink-0 bg-white" style="width: 320px; min-width: 250px;">
+        
+        <!-- タイトル -->
+        <div>
+            <h1 class="text-2xl font-extrabold text-slate-800 tracking-tight mb-2">振り子シミュレーター</h1>
+            <p class="text-sm text-slate-500 font-medium">条件を変えて周期を測定しよう！</p>
+        </div>
+
+        <!-- パラメータ設定 -->
+        <div class="flex flex-col gap-6">
+            <!-- 長さ -->
+            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <div class="flex justify-between items-end mb-2">
+                    <label class="text-sm font-bold text-slate-700">糸の長さ</label>
+                    <span class="text-base font-bold text-blue-600" id="length-val">100 cm (1.00 m)</span>
+                </div>
+                <input type="range" id="length-slider" min="10" max="200" step="1" value="100">
+            </div>
+
+            <!-- 質量 -->
+            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <div class="flex justify-between items-end mb-2">
+                    <label class="text-sm font-bold text-slate-700">おもりの重さ</label>
+                    <span class="text-base font-bold text-slate-700" id="mass-val">50 g</span>
+                </div>
+                <input type="range" id="mass-slider" min="10" max="100" step="10" value="50">
+            </div>
+
+            <!-- 角度 -->
+            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <div class="flex justify-between items-end mb-2">
+                    <label class="text-sm font-bold text-slate-700">開始の角度</label>
+                    <span class="text-base font-bold text-slate-700" id="angle-val">45 °</span>
+                </div>
+                <input type="range" id="angle-slider" min="5" max="90" step="1" value="45">
+            </div>
+            
+            <button id="btn-play-pause" class="btn-base mt-2 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-4 rounded-xl shadow-sm">
+                スタート
+            </button>
+        </div>
+    </aside>
+
+    <!-- ドラッグ可能な境界線 -->
+    <div id="resizer" class="shrink-0 shadow-inner"></div>
+
+    <!-- 右側：キャンバス領域 -->
+    <main id="right-panel" class="flex-1 relative bg-slate-100 overflow-hidden">
+        <canvas id="simCanvas"></canvas>
+        
+        <!-- 自動測定パネル（独立してドラッグ可能） -->
+        <div id="panel-auto" class="absolute bottom-6 right-6 w-72 flex flex-col z-20 shadow-xl rounded-2xl bg-white/95 backdrop-blur-md border border-slate-200/50" style="touch-action: none;">
+            <div id="drag-auto" class="w-full h-8 cursor-grab active:cursor-grabbing flex items-center justify-center rounded-t-2xl bg-slate-200/80 hover:bg-slate-300/80 transition-colors">
+                <div class="w-12 h-1.5 bg-slate-400 rounded-full"></div>
+            </div>
+            <div class="px-4 pb-4 pt-2 flex flex-col gap-3">
+                <h2 class="text-sm font-bold text-blue-800 mb-2">周期（1往復の時間）を自動測定</h2>
+                <button id="btn-auto-measure" class="btn-base w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded-lg text-sm shadow-sm">
+                    測定予約
+                </button>
+                <div class="bg-blue-50 border border-blue-200 rounded-xl p-3 flex flex-col items-center justify-center min-h-[70px]">
+                    <span id="auto-status-text" class="text-xs text-slate-500 font-bold mb-1">待機中</span>
+                    <span id="auto-time" class="text-3xl font-bold stopwatch-font text-slate-300 tracking-tight">0.00<span class="text-lg ml-1">s</span></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 手動ストップウォッチパネル（独立してドラッグ可能） -->
+        <div id="panel-manual" class="absolute bottom-6 right-80 mr-4 w-64 flex flex-col z-20 shadow-xl rounded-2xl bg-slate-800/95 backdrop-blur-md border border-slate-700 text-white" style="touch-action: none;">
+            <div id="drag-manual" class="w-full h-8 cursor-grab active:cursor-grabbing flex items-center justify-center rounded-t-2xl bg-slate-700/80 hover:bg-slate-600/80 transition-colors">
+                <div class="w-12 h-1.5 bg-slate-500 rounded-full"></div>
+            </div>
+            <div class="px-4 pb-4 pt-2 flex flex-col gap-3">
+                <h2 class="text-xs text-slate-400 font-bold mb-2 uppercase tracking-wider text-center">ストップウォッチ</h2>
+                <div class="text-4xl font-bold stopwatch-font text-center tracking-tight mb-4" id="manual-time">
+                    0.00<span class="text-xl text-slate-400 ml-1">s</span>
+                </div>
+                <div class="flex gap-2">
+                    <button id="btn-manual-toggle" class="btn-base flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2 rounded-lg text-sm">
+                        スタート
+                    </button>
+                    <button id="btn-manual-reset" class="btn-base w-1/3 bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 rounded-lg text-sm">
+                        リセット
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // --- Split Pane Resizing Logic ---
+        const resizer = document.getElementById('resizer');
+        const leftPanel = document.getElementById('left-panel');
+        let isResizing = false;
+
+        resizer.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            resizer.classList.add('active');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none'; // Prevent text selection
+        });
+
+        resizer.addEventListener('touchstart', (e) => {
+            isResizing = true;
+            resizer.classList.add('active');
+            document.body.style.overflow = 'hidden'; // Prevent scrolling on mobile while dragging
+        }, {passive: false});
+
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('touchmove', (e) => {
+            if(isResizing) handleMouseMove(e.touches[0]);
+        }, {passive: false});
+
+        function handleMouseMove(e) {
+            if (!isResizing) return;
+            let newWidth = e.clientX;
+            // 制約：最小 250px、最大 画面幅の50%
+            const minWidth = 250;
+            const maxWidth = window.innerWidth * 0.5;
+            if (newWidth < minWidth) newWidth = minWidth;
+            if (newWidth > maxWidth) newWidth = maxWidth;
+            
+            leftPanel.style.width = newWidth + 'px';
+            resizeCanvas();
+        }
+
+        const stopResizing = () => {
+            isResizing = false;
+            resizer.classList.remove('active');
+            document.body.style.cursor = 'default';
+            document.body.style.userSelect = 'auto';
+            document.body.style.overflow = 'auto';
+        };
+
+        document.addEventListener('mouseup', stopResizing);
+        document.addEventListener('touchend', stopResizing);
+
+
+        // --- Simulation & DOM Elements ---
+        const canvas = document.getElementById('simCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        const sliderLength = document.getElementById('length-slider');
+        const sliderMass = document.getElementById('mass-slider');
+        const sliderAngle = document.getElementById('angle-slider');
+        
+        const valLength = document.getElementById('length-val');
+        const valMass = document.getElementById('mass-val');
+        const valAngle = document.getElementById('angle-val');
+        
+        const btnPlayPause = document.getElementById('btn-play-pause');
+        
+        const btnAutoMeasure = document.getElementById('btn-auto-measure');
+        const autoStatusText = document.getElementById('auto-status-text');
+        const autoTimeEl = document.getElementById('auto-time');
+        
+        const manualTimeEl = document.getElementById('manual-time');
+        const btnManualToggle = document.getElementById('btn-manual-toggle');
+        const btnManualReset = document.getElementById('btn-manual-reset');
+
+        // --- Dragging Logic for Floating Panels ---
+        function makeDraggable(panelId, handleId) {
+            const panel = document.getElementById(panelId);
+            const handle = document.getElementById(handleId);
+            let isDragging = false;
+            let startX, startY, initialLeft, initialTop;
+
+            const dragStart = (e) => {
+                isDragging = true;
+                const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+                const clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+                
+                startX = clientX;
+                startY = clientY;
+                
+                const rect = panel.getBoundingClientRect();
+                const parentRect = panel.parentElement.getBoundingClientRect();
+                
+                panel.style.bottom = 'auto';
+                panel.style.right = 'auto';
+                panel.style.left = (rect.left - parentRect.left) + 'px';
+                panel.style.top = (rect.top - parentRect.top) + 'px';
+                
+                initialLeft = parseFloat(panel.style.left);
+                initialTop = parseFloat(panel.style.top);
+
+                document.addEventListener('mousemove', dragMove);
+                document.addEventListener('mouseup', dragEnd);
+                document.addEventListener('touchmove', dragMove, {passive: false});
+                document.addEventListener('touchend', dragEnd);
+            };
+
+            const dragMove = (e) => {
+                if (!isDragging) return;
+                const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+                const clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+                
+                const dx = clientX - startX;
+                const dy = clientY - startY;
+                
+                panel.style.left = (initialLeft + dx) + 'px';
+                panel.style.top = (initialTop + dy) + 'px';
+            };
+
+            const dragEnd = () => {
+                isDragging = false;
+                document.removeEventListener('mousemove', dragMove);
+                document.removeEventListener('mouseup', dragEnd);
+                document.removeEventListener('touchmove', dragMove);
+                document.removeEventListener('touchend', dragEnd);
+            };
+
+            handle.addEventListener('mousedown', dragStart);
+            handle.addEventListener('touchstart', dragStart, {passive: false});
+        }
+
+        makeDraggable('panel-auto', 'drag-auto');
+        makeDraggable('panel-manual', 'drag-manual');
+
+        // Physics Constants
+        const GRAVITY = 9.8; 
+        
+        // Settings
+        let lengthCm = parseInt(sliderLength.value);
+        let massG = parseInt(sliderMass.value);
+        let initialAngleDeg = parseInt(sliderAngle.value);
+
+        // Simulation Dynamic State
+        let theta = initialAngleDeg * (Math.PI / 180);
+        let omega = 0;
+        
+        // Auto Measure State
+        // 'IDLE', 'WAIT_START', 'MEASURING', 'FINISHED'
+        let autoState = 'IDLE'; 
+        let autoTimer = 0;
+        let turnsCount = 0;
+        let trailAngles = [];
+
+        // Play/Pause State
+        let isPlaying = false;
+
+        // Manual Stopwatch State
+        let isManualRunning = false;
+        let manualTimer = 0;
+
+        let lastTimestamp = 0;
+
+        function resizeCanvas() {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            ctx.scale(dpr, dpr);
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        // --- Event Listeners ---
+        function updateSliders() {
+            lengthCm = parseInt(sliderLength.value);
+            const lengthM = (lengthCm / 100).toFixed(2);
+            valLength.textContent = `${lengthCm} cm (${lengthM} m)`;
+            
+            massG = parseInt(sliderMass.value);
+            valMass.textContent = `${massG} g`;
+            
+            initialAngleDeg = parseInt(sliderAngle.value);
+            valAngle.textContent = `${initialAngleDeg} °`;
+        }
+
+        sliderLength.addEventListener('input', () => { updateSliders(); forceResetPhysics(); });
+        sliderMass.addEventListener('input', updateSliders);
+        
+        // 角度スライダーを動かした瞬間リセットする
+        sliderAngle.addEventListener('input', () => { updateSliders(); forceResetPhysics(); });
+
+        btnPlayPause.addEventListener('click', () => {
+            isPlaying = !isPlaying;
+            if (isPlaying) {
+                btnPlayPause.textContent = '一時停止';
+                btnPlayPause.classList.replace('bg-emerald-500', 'bg-amber-500');
+                btnPlayPause.classList.replace('hover:bg-emerald-600', 'hover:bg-amber-600');
+            } else {
+                btnPlayPause.textContent = 'スタート';
+                btnPlayPause.classList.replace('bg-amber-500', 'bg-emerald-500');
+                btnPlayPause.classList.replace('hover:bg-amber-600', 'hover:bg-emerald-600');
+            }
+        });
+
+        function forceResetPhysics() {
+            theta = initialAngleDeg * (Math.PI / 180);
+            omega = 0;
+            
+            isPlaying = false;
+            btnPlayPause.textContent = 'スタート';
+            btnPlayPause.className = 'btn-base mt-2 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-4 rounded-xl shadow-sm';
+
+            autoState = 'IDLE';
+            autoStatusText.textContent = '待機中';
+            autoStatusText.className = "text-xs text-slate-500 font-bold mb-1";
+            autoTimeEl.innerHTML = `0.00<span class="text-lg ml-1">s</span>`;
+            autoTimeEl.className = "text-3xl font-bold stopwatch-font text-slate-300 tracking-tight";
+            trailAngles = [];
+        }
+
+        // Auto Measure
+        btnAutoMeasure.addEventListener('click', () => {
+            autoState = 'WAIT_START';
+            autoTimer = 0;
+            turnsCount = 0;
+            trailAngles = [];
+            autoStatusText.innerHTML = '次の端点で測定スタート...';
+            autoStatusText.className = "text-xs text-amber-600 font-bold mb-1";
+            autoTimeEl.innerHTML = `0.00<span class="text-lg ml-1">s</span>`;
+            autoTimeEl.className = "text-3xl font-bold stopwatch-font text-slate-800 tracking-tight";
+        });
+
+        // Manual Stopwatch
+        btnManualToggle.addEventListener('click', () => {
+            isManualRunning = !isManualRunning;
+            if (isManualRunning) {
+                btnManualToggle.textContent = 'ストップ';
+                btnManualToggle.classList.replace('bg-emerald-500', 'bg-rose-500');
+                btnManualToggle.classList.replace('hover:bg-emerald-600', 'hover:bg-rose-600');
+            } else {
+                btnManualToggle.textContent = 'スタート';
+                btnManualToggle.classList.replace('bg-rose-500', 'bg-emerald-500');
+                btnManualToggle.classList.replace('hover:bg-rose-600', 'hover:bg-emerald-600');
+            }
+        });
+
+        btnManualReset.addEventListener('click', () => {
+            manualTimer = 0;
+            updateManualDisplay();
+        });
+
+        function updateManualDisplay() {
+            manualTimeEl.innerHTML = `${manualTimer.toFixed(2)}<span class="text-xl text-slate-400 ml-1">s</span>`;
+        }
+
+        // --- Main Physics & Render Loop ---
+        function loop(timestamp) {
+            if (!lastTimestamp) lastTimestamp = timestamp;
+            let dt = (timestamp - lastTimestamp) / 1000;
+            lastTimestamp = timestamp;
+            if (dt > 0.1) dt = 0.1; // Limit maximum dt to avoid explosions
+
+            if (isPlaying) {
+                const L = lengthCm / 100;
+                const subSteps = 100; 
+                const subDt = dt / subSteps;
+                
+                for (let i = 0; i < subSteps; i++) {
+                    let prevOmega = omega;
+                    
+                    // d^2θ/dt^2 = -(g/L)sin(θ)
+                    let alpha = -(GRAVITY / L) * Math.sin(theta);
+                    omega += alpha * subDt;
+                    theta += omega * subDt;
+
+                    // Auto Measurement Logic
+                    if (autoState !== 'IDLE' && autoState !== 'FINISHED') {
+                        // Velocity sign change = extreme point
+                        if (prevOmega * omega < 0) {
+                            if (autoState === 'WAIT_START') {
+                                autoState = 'MEASURING';
+                                autoTimer = 0;
+                                turnsCount = 0;
+                                autoStatusText.innerHTML = '🔴 周期（1往復）を測定中...';
+                                autoStatusText.className = "text-xs text-red-600 font-bold mb-1 animate-pulse";
+                            } else if (autoState === 'MEASURING') {
+                                turnsCount++;
+                                // 2 turns = 1 full period
+                                if (turnsCount === 2) {
+                                    autoState = 'FINISHED';
+                                    autoStatusText.innerHTML = '測定完了！';
+                                    autoStatusText.className = "text-xs text-blue-600 font-bold mb-1";
+                                    autoTimeEl.innerHTML = `${autoTimer.toFixed(2)}<span class="text-lg ml-1">s</span>`;
+                                    autoTimeEl.className = "text-4xl font-extrabold stopwatch-font text-blue-700 tracking-tight";
+                                }
+                            }
+                        }
+
+                        if (autoState === 'MEASURING') {
+                            autoTimer += subDt;
+                            if (i % 10 === 0) {
+                                trailAngles.push(theta);
+                            }
+                            // Update display live while measuring
+                            autoTimeEl.innerHTML = `${autoTimer.toFixed(2)}<span class="text-lg ml-1 text-slate-400">s</span>`;
+                        }
+                    }
+                }
+            }
+
+            if (isManualRunning) {
+                manualTimer += dt;
+                updateManualDisplay();
+            }
+
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        function draw() {
+            const width = canvas.clientWidth;
+            const height = canvas.clientHeight;
+            ctx.clearRect(0, 0, width, height);
+
+            const L = lengthCm / 100;
+            const pivotX = width / 2;
+            const pivotY = 50; 
+            
+            // スケール計算（200cmが画面内に収まるように）
+            const maxPxLength = height - pivotY - 70;
+            const pixelsPerMeter = maxPxLength / 2.0; 
+            const stringLengthPx = L * pixelsPerMeter;
+            
+            const bobX = pivotX + stringLengthPx * Math.sin(theta);
+            const bobY = pivotY + stringLengthPx * Math.cos(theta);
+
+            // 軌跡（Trail）の描画
+            if ((autoState === 'MEASURING' || autoState === 'FINISHED') && trailAngles.length > 0) {
+                ctx.beginPath();
+                for (let i = 0; i < trailAngles.length; i++) {
+                    const tx = pivotX + stringLengthPx * Math.sin(trailAngles[i]);
+                    const ty = pivotY + stringLengthPx * Math.cos(trailAngles[i]);
+                    if (i === 0) ctx.moveTo(tx, ty);
+                    else ctx.lineTo(tx, ty);
+                }
+                ctx.strokeStyle = 'rgba(59, 130, 246, 0.3)'; // Blue transparent
+                ctx.lineWidth = 6;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.stroke();
+            }
+
+            // 支柱（奥側）
+            ctx.fillStyle = '#94a3b8';
+            ctx.fillRect(pivotX - 50, pivotY - 12, 100, 24);
+            ctx.strokeStyle = '#cbd5e1';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(pivotX - 50, pivotY - 12, 100, 24);
+            ctx.fillStyle = '#334155';
+            ctx.beginPath(); ctx.arc(pivotX - 35, pivotY, 4, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(pivotX + 35, pivotY, 4, 0, Math.PI*2); ctx.fill();
+
+            // 糸
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
+            ctx.shadowBlur = 4;
+            ctx.shadowOffsetX = 2;
+            ctx.shadowOffsetY = 2;
+            ctx.beginPath();
+            ctx.moveTo(pivotX, pivotY);
+            ctx.lineTo(bobX, bobY);
+            ctx.strokeStyle = '#475569';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.shadowColor = 'transparent';
+
+            // おもり（重さによってサイズ変更 10g~100g）
+            const baseRadius = 14;
+            const radius = baseRadius * Math.pow(massG / 50, 1/3); // 50gを基準にスケーリング
+            
+            const lightX = bobX - radius * 0.3;
+            const lightY = bobY - radius * 0.3;
+            
+            // 影
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+            ctx.shadowBlur = 12;
+            ctx.shadowOffsetX = 4;
+            ctx.shadowOffsetY = 10;
+
+            // 金属の質感グラデーション
+            const grad = ctx.createRadialGradient(lightX, lightY, radius * 0.1, bobX, bobY, radius);
+            grad.addColorStop(0, '#ffffff');
+            grad.addColorStop(0.2, '#e2e8f0');
+            grad.addColorStop(0.6, '#94a3b8');
+            grad.addColorStop(0.9, '#475569');
+            grad.addColorStop(1, '#1e293b');
+
+            ctx.beginPath();
+            ctx.arc(bobX, bobY, radius, 0, Math.PI * 2);
+            ctx.fillStyle = grad;
+            ctx.fill();
+            ctx.shadowColor = 'transparent';
+
+            // 金属の反射ハイライト
+            ctx.beginPath();
+            ctx.arc(bobX, bobY, radius * 0.8, 0.7 * Math.PI, 1.3 * Math.PI);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.lineWidth = radius * 0.12;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+
+            // 支柱（手前のピン）
+            const pinGrad = ctx.createRadialGradient(pivotX-2, pivotY-2, 1, pivotX, pivotY, 6);
+            pinGrad.addColorStop(0, '#ffffff');
+            pinGrad.addColorStop(1, '#475569');
+            ctx.beginPath();
+            ctx.arc(pivotX, pivotY, 6, 0, Math.PI * 2);
+            ctx.fillStyle = pinGrad;
+            ctx.fill();
+        }
+
+        // 初期化
+        setTimeout(() => {
+            resizeCanvas();
+            requestAnimationFrame(loop);
+        }, 100);
+
+    </script>
+</body>
+</html>
